@@ -1,0 +1,4 @@
+langgraph
+google-generativeai
+python-dotenv
+nicegui
