@@ -10,6 +10,7 @@ from .agents.analyser import analyze_and_summarize
 from .agents.decider import decide_next_action
 from .agents.error_handler import fix_command
 from .agents.planner import create_initial_plan
+from .agents.sanitizer import sanitize_command 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -37,7 +38,20 @@ async def planner_node(state: VaptState):
 # The NEW, smarter version
 async def execute_node(state: VaptState, config: dict):
     logging.info("--- ACTION: EXECUTING COMMAND ---")
-    command_to_run = state["current_command"]
+    
+    # 1. Get the raw command proposed by the AI
+    proposed_command = state["current_command"]
+    
+    # 2. Clean and correct the command using your sanitizer
+    sanitized_command = sanitize_command(proposed_command)
+    
+    # 3. Log if the sanitizer made a change (optional but good for debugging)
+    if proposed_command != sanitized_command:
+        logging.info(f"Sanitizer corrected command from '{proposed_command}' to '{sanitized_command}'")
+    
+    # 4. Use the SAFE, sanitized command for the rest of the execution
+    command_to_run = sanitized_command
+
     command_with_target = command_to_run.replace("{target}", state["target"])
     
     stop_event = config['configurable'].get('stop_event')
@@ -46,26 +60,20 @@ async def execute_node(state: VaptState, config: dict):
     output = result.get("output", "")
     error = result.get("error")
 
-    # --- THIS IS THE FIX: A GUARD CLAUSE FOR LOGICAL ERRORS ---
-    # Check for specific "failure-in-success" strings in the output,
-    # even if the command returned a success exit code (error is None).
     if error is None:
-        if "Note: Host seems down." in output:
-            logging.warning("Logical error detected: Host seems down. Triggering error handler.")
-            # We treat the entire output as the error so the AI can see the suggestion.
-            error = output
-        elif "Transfer failed." in output:
-            logging.warning("Logical error detected: DNS transfer failed. Triggering error handler.")
+        if "Note: Host seems down." in output or "Transfer failed." in output:
+            logging.warning("Logical error detected. Triggering error handler.")
             error = output
             
     return {
-        "executed_command": command_to_run,
+        # Return the final command that was actually run
+        "executed_command": command_with_target,
         "command_output": output,
-        "command_error": error, # This is now populated even on logical failures
+        "command_error": error,
         "history": [f"Attempted: {command_with_target}"]
     }
 
-# The NEW, more robust version
+
 async def analyze_node(state: VaptState):
     logging.info("--- SENSE: ANALYZING AND SUMMARIZING ---")
     
@@ -211,7 +219,7 @@ def compile_graph():
         "human_approval_gate": "human_approval_gate", "execute": "execute", "report": "report"
     })
     builder.add_conditional_edges("error_handler", route_after_command_proposal, {
-        "human_approval_gate": "human_approval_gate", "execute": "execute", "report": "report"
+       "decide":"decide" , "human_approval_gate": "human_approval_gate", "execute": "execute", "report": "report"
     })
 
     # The edge from the approval gate uses the NEW router

@@ -19,6 +19,9 @@ class SharedState:
         self.stop_event = asyncio.Event()
         self.approval_event = asyncio.Event()
 
+        self.scan_id_counter = 0
+        self.scan_histories = {}
+
     def reset(self):
         """
         Resets the state for the beginning of a new scan to prevent

@@ -29,27 +29,31 @@ async def analyze_and_summarize(command_output: str, existing_summary: str) -> d
 
     # --- THIS IS THE FIX: A PROMPT THAT RECOGNIZES FAILED ATTEMPTS ---
     interpretive_analysis_prompt = f"""
-    You are a fact-extraction engine for a VAPT agent.
-    Your task is to analyze the 'Tool Output' and extract ONLY the most critical findings.
+        You are a fact-extraction engine for a VAPT agent.
+        Your task is to analyze the 'Tool Output' and extract ONLY the most critical findings.
+        
+        **OUTPUT INSTRUCTIONS:**
+        - Your response MUST be a human-readable, bulleted list.
+        - Each bullet MUST include:
+            • Severity level with emoji (🔴 Critical, 🟠 Medium, 🟢 Low, 🔵 Info)
+            • Key fact(s) (e.g., IP, open port, software version, etc.)
+            • A brief reason why it’s relevant or how it could be exploited.
+        - If the output indicates a logical failure (e.g., "Transfer failed", "Host seems down", "Connection refused"), you MUST report it with (⚠️ Failed).
+        - DO NOT suggest "next steps".
+        - DO NOT explain the tool or its options.
+        - If there are no positive findings AND no logical failures, respond with: **No significant findings.**
+        
+        **Example of a failed attempt output:**
+        - ⚠️ Failed: The attempt to perform a DNS zone transfer (AXFR) failed.
+        
+        **Tool Output:**
+        ---
+        {command_output}
+        ---
+        
+        **Extracted Findings:**
+        """
 
-    **OUTPUT INSTRUCTIONS:**
-    - Your response MUST be a brief, human-readable, bulleted list.
-    - Extract key facts (IP addresses, open ports, software versions, directories).
-    - **Crucially, if the output indicates a logical failure (e.g., "Transfer failed", "Host seems down", "Connection refused"), you MUST state that the attempt failed.**
-    - DO NOT explain the tool or its flags.
-    - DO NOT suggest "next steps".
-    - If there are no positive findings AND no logical failures, respond with "No significant findings."
-
-    **Example of a failed attempt output:**
-    - The attempt to perform a DNS zone transfer (AXFR) failed.
-
-    **Tool Output:**
-    ---
-    {command_output}
-    ---
-
-    **Extracted Facts:**
-    """
     try:
         interpretive_analysis = await asyncio.to_thread(_blocking_generate, interpretive_analysis_prompt)
         print(f"\n[📊] Extracted Facts:\n{interpretive_analysis}")
