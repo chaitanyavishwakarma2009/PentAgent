@@ -1,30 +1,42 @@
-# frontend/components/control_panel.py
 from nicegui import ui
+from frontend.state import SharedState
 
-def create_control_panel(state, mode_dialog):
+def create_control_panel(state: SharedState, mode_dialog: ui.dialog):
     """
-    Creates the main user input and control buttons.
-    The 'start_button' now only needs to open the dialog.
+    Creates the main user control panel with target input, a new scan type
+    dropdown, and start/stop buttons.
     """
-    with ui.card().classes('w-full'):
+    with ui.card().classes('w-full no-shadow border-[1px]'):
         with ui.row().classes('w-full items-center'):
+            # --- Target Input (Unchanged) ---
             target_input = ui.input(
-                placeholder='Enter target IP or domain'
-            ).classes('flex-grow')
+                placeholder='Enter target (e.g., example.com or 192.168.1.1)'
+            ).props('outlined dense').classes('flex-grow')
 
-            start_button = ui.button(
-                'Start Scan', 
-                on_click=lambda: mode_dialog.open() if target_input.value else ui.notify('Please enter a target.', type='negative')
-            )
-            
-            def stop_scan():
-                ui.notify('Stop signal sent.')
-                state.stop_event.set()
-                
-            stop_button = ui.button('Stop Scan', on_click=stop_scan)
-            
-    # Initial button states
-    start_button.set_enabled(True)
-    stop_button.set_enabled(False)
-    
-    return target_input, start_button, stop_button
+            # --- NEW: Scan Type Dropdown ---
+            # This is a ui.select element, which acts as a dropdown menu.
+            scan_type_options = [
+                'Full Scan', 
+                'Vulnerability Assessment', 
+                'Reconnaissance Only', 
+                'Web Application Scan'
+            ]
+            scan_type_select = ui.select(
+                options=scan_type_options, 
+                value='Full Scan' # Set a default value
+            ).props('outlined dense').classes('w-64 ml-2') \
+             .tooltip('Select the type of scan to perform')
+
+            # --- Start/Stop Buttons (Unchanged) ---
+            start_button = ui.button('Start Scan', on_click=mode_dialog.open) \
+                .props('color=primary icon=play_arrow')
+            stop_button = ui.button('Stop Scan', on_click=state.stop_event.set) \
+                .props('color=red icon=stop')
+
+    # This function is returned and used by main_ui.py
+    def update_button_states():
+        start_button.set_enabled(not state.is_scan_running.value)
+        stop_button.set_enabled(state.is_scan_running.value)
+
+    # We need to return the new dropdown select as well
+    return target_input, scan_type_select, start_button, stop_button

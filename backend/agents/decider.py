@@ -1,69 +1,36 @@
-#backend/agents/decider.py
-import os
-import asyncio
-import google.generativeai as genai
-from dotenv import load_dotenv
+# The decider is also much cleaner.
 
-load_dotenv()
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-flash')
+# --- It only needs to import our new, universal interface ---
+from .llm_interface import call_generative_model
 
-def _blocking_decide_action(prompt: str) -> str:
-    """The actual blocking API call."""
-    safety_settings = {
-        'HARM_CATEGORY_HARASSMENT': 'BLOCK_NONE',
-        'HARM_CATEGORY_HATE_SPEECH': 'BLOCK_NONE',
-        'HARM_CATEGORY_SEXUALLY_EXPLICIT': 'BLOCK_NONE',
-        'HARM_CATEGORY_DANGEROUS_CONTENT': 'BLOCK_NONE',
-    }
-    response = model.generate_content(prompt, safety_settings=safety_settings)
-    return response.text.strip()
-
-async def decide_next_action(summary: str, target: str) -> str:
+# --- THIS IS THE CORRECTED FUNCTION NAME ---
+async def decide_next_action(findings_summary: str, target: str, scan_type: str, tried_commands: list) -> str:
     """
-    Acts as a reconnaissance specialist. This version ALWAYS returns a command.
-    The scan only stops when the user clicks the 'Stop' button.
+    Decides the next action by calling the universal generative model interface.
     """
-    print("\n[🤔] Deciding next recon capability with Gemini...")
-
-    # --- THIS IS THE FIX: THE AI IS NO LONGER ALLOWED TO END THE SCAN ---
+    print(f"\n[🧠] Deciding next step for '{scan_type}' on '{target}'...")
+    
     prompt = f"""
-    You are a senior VAPT (Vulnerability Assessment and Penetration Testing) specialist. Your role is to continue an ongoing reconnaissance scan.
-    Your target is: `{target}`
+    You are an expert VAPT agent deciding the next step.
+    The overall mission is: **{scan_type}**
+    The target is: {target}
+    Findings so far: "{findings_summary}"
 
-    **Your Goal:**
-    Based on the findings so far, determine the single best command to run for the **very next step**. The scan must continue.
+    CRITICAL: The following commands have already been tried or suggested in this session. You MUST NOT suggest them again:
+    {tried_commands}
 
-    **Reasoning Process:**
-    1.  **Analyze Gaps:** Review the 'CUMULATIVE FINDINGS' to see what information is missing.
-    2.  **Identify Next Step:** Determine the most logical capability needed next. Even if a lot of information has been gathered, there is always another step (e.g., check for different vulnerabilities, try a different wordlist, check DNS records, etc.).
-    3.  **Construct Command:** Formulate the best single-line Kali Linux command for that next step.
-
-    **CUMULATIVE FINDINGS SO FAR:**
-    ---
-    {summary}
-    ---
-
-    **OUTPUT INSTRUCTIONS:**
-    Your response MUST be ONLY the single, runnable command to execute next.
-    - DO NOT use the word "END". The scan will only be stopped by the user.
-    - DO NOT include any explanation, reasoning, or markdown formatting.
-
-    **Your Next Command:**
+    Based on the mission, the findings, and avoiding the commands listed above, what is the single best next command to run?
+    If you have no other ideas or the mission is complete, return the single word "END".
+    Otherwise, return only the single, complete next command to run.
     """
 
-    try:
-        next_command = await asyncio.to_thread(_blocking_decide_action, prompt)
-        
-        # Cleanup and a fallback just in case the AI returns an empty response
-        cleaned_command = next_command.replace("```bash", "").replace("```", "").strip()
-        
-        if not cleaned_command or cleaned_command.upper() == "END":
-            print("[⚠] Decider returned an invalid empty/END command. Falling back to a safe nmap scan.")
-            return f"nmap -T4 -sV {target}"
+    # --- The AI call is now simple and clean ---
+    next_command = await call_generative_model(prompt)
 
-        print(f"\n[💡] Decider's next command: {cleaned_command}")
-        return cleaned_command
-    except Exception as e:
-        print(f"\n[✖] Error during decision: {e}. Falling back to a safe nmap scan.")
-        return f"nmap -T4 -sV {target}" # Fallback on error
+    # The agent is still responsible for its own logic.
+    if not next_command:
+        print("[⚠] AI interface returned an empty command. Ending scan.")
+        return "END"
+        
+    print(f"\n[💡] Decider's Decision: {next_command}")
+    return next_command

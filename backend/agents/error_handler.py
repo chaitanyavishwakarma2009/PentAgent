@@ -1,31 +1,14 @@
-#backend/agents/error_handler.py
-import os
-import asyncio
-import google.generativeai as genai
-from dotenv import load_dotenv
+# The error handler is now much cleaner.
 
-load_dotenv()
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-flash')
-
-def _blocking_fix_command(prompt: str) -> str:
-    """The actual blocking API call."""
-    safety_settings = {
-        'HARM_CATEGORY_HARASSMENT': 'BLOCK_NONE',
-        'HARM_CATEGORY_HATE_SPEECH': 'BLOCK_NONE',
-        'HARM_CATEGORY_SEXUALLY_EXPLICIT': 'BLOCK_NONE',
-        'HARM_CATEGORY_DANGEROUS_CONTENT': 'BLOCK_NONE',
-    }
-    response = model.generate_content(prompt, safety_settings=safety_settings)
-    return response.text.strip()
+# --- It only needs to import our universal interface ---
+from .llm_interface import call_generative_model
 
 async def fix_command(failed_command: str, error_message: str) -> str:
     """
-    Analyzes a failed command and suggests a fix, or decides to continue or abort.
+    Analyzes a failed command by calling the universal generative model interface.
     """
-    print("\n[🧠] Analyzing command error with Gemini...")
+    print("\n[🧠] Analyzing command error...")
 
-    # --- THIS IS THE FIX: A NEW PROMPT WITH A 'CONTINUE' OPTION ---
     prompt = f"""
     You are a command-line expert fixing a failed command in a VAPT scan.
     Analyze the 'Failed Command' and its 'Error Message'.
@@ -45,13 +28,15 @@ async def fix_command(failed_command: str, error_message: str) -> str:
 
     **Your Response (Corrected Command, "CONTINUE", or "ABORT"):**
     """
-    try:
-        response = await asyncio.to_thread(_blocking_fix_command, prompt)
-        cleaned_response = response.replace("`", "").strip()
-        
-        print(f"\n[💡] Error Handler's Decision: {cleaned_response}")
-        return cleaned_response
+    
+    # --- The AI call is now simple and clean ---
+    response = await call_generative_model(prompt)
+    
+    # The agent is still responsible for its own logic.
+    if not response:
+        print(f"\n[✖] AI interface returned an empty response during error handling. Aborting.")
+        return "ABORT"
 
-    except Exception as e:
-        print(f"\n[✖] Error during error handling: {e}")
-        return "ABORT" # If the AI itself fails, we should abort
+    cleaned_response = response.replace("`", "").strip()
+    print(f"\n[💡] Error Handler's Decision: {cleaned_response}")
+    return cleaned_response

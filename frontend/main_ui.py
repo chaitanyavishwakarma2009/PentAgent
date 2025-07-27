@@ -44,7 +44,10 @@ def main_page():
 
     # --- MAIN PAGE CONTENT ---
     mode_dialog = ui.dialog()
-    target_input, start_button, stop_button = create_control_panel(state, mode_dialog)
+    
+    # --- THIS IS THE FIX (Part 1): Unpack the new dropdown from the component ---
+    target_input, scan_type_select, start_button, stop_button = create_control_panel(state, mode_dialog)
+    
     create_approval_panel(state)
     analysis_view, log, status_label = create_reporting_panel()
 
@@ -53,7 +56,14 @@ def main_page():
         start_button.set_enabled(not state.is_scan_running.value)
         stop_button.set_enabled(state.is_scan_running.value)
 
-    async def start_scan(target: str, mode: str):
+    # --- THIS IS THE FIX (Part 2): Update start_scan to accept scan_type ---
+    async def start_scan(target: str, scan_type: str, mode: str):
+        # Log the selected scan type to confirm it's working
+        logging.info(f"--- Starting New Scan ---")
+        logging.info(f"Target: {target}")
+        logging.info(f"Scan Type: {scan_type}")
+        logging.info(f"Mode: {mode}")
+
         # Reset parts of the state for a clean run
         state.reset()
         log.clear()
@@ -71,14 +81,21 @@ def main_page():
         scan_id_counter = state.scan_id_counter
         state.scan_id.value = scan_id_counter
         
-        # Create an empty list for this new scan's history within the state
         state.scan_histories[scan_id_counter] = []
         
+        # We will need to pass the scan_type to the backend in the future
         config = {
-            "configurable": { "scan_mode": mode, "approval_event": state.approval_event, "stop_event": state.stop_event, "user_choice": state.user_choice }
+            "configurable": { 
+                "scan_mode": mode,
+                "scan_type": scan_type, # Pass the scan type here
+                "approval_event": state.approval_event, 
+                "stop_event": state.stop_event, 
+                "user_choice": state.user_choice 
+            }
         }
 
         try:
+            # We also need to pass the scan type to the backend stream function
             async for update in run_vapt_agent_stream(target, config):
                 node_name = list(update.keys())[0]
                 if node_name == "__end__":
@@ -87,31 +104,22 @@ def main_page():
 
                 node_output = update[node_name]
 
-                # --- NEW LOGIC TO CORRECTLY SAVE HISTORY AND ANALYSIS ---
-
-                # 1. When a command is EXECUTED, create its history entry with a placeholder.
                 if node_output and node_name == 'execute':
                     history_entry = {
                         "command": node_output.get("executed_command", "N/A"),
                         "output": node_output.get("command_output") or node_output.get("command_error", "No output."),
-                        "analysis": "" # Add a placeholder for the analysis report
+                        "analysis": ""
                     }
                     state.scan_histories[state.scan_id.value].append(history_entry)
 
-                # 2. When the result is ANALYZED, update the main view AND the last history entry.
                 if node_output and node_name == 'analyze':
                     interpretive_analysis = node_output.get('detailed_analysis', 'No analysis available.')
-                    analysis_view.set_content(interpretive_analysis) # Update main UI panel
+                    analysis_view.set_content(interpretive_analysis)
                     
-                    # Find the history for the current scan
                     current_scan_history = state.scan_histories.get(state.scan_id.value)
-                    # If history exists, update the 'analysis' field of the LAST entry
                     if current_scan_history:
                         current_scan_history[-1]['analysis'] = interpretive_analysis
 
-                # --- END NEW LOGIC ---
-
-                # This logging is separate and provides a simple, chronological feed.
                 log_message = f">>> Node '{node_name}' finished."
                 if node_output:
                     if 'current_command' in node_output and node_output['current_command']:
@@ -123,7 +131,6 @@ def main_page():
                         log_message += "\n   - Analysis report updated."
                 log.push(log_message)
                 
-                # Manual approval logic remains unchanged
                 nodes_that_propose_commands = ["planner", "decide", "error_handler"]
                 if node_output and node_name in nodes_that_propose_commands and state.scan_mode.value == 'manual':
                     command = node_output.get("current_command")
@@ -145,12 +152,22 @@ def main_page():
 
 
     async def handle_autonomous_click():
+
+        if not target_input.value or not target_input.value.strip():
+        # 2. If it's empty, show a notification and stop.
+            ui.notify('Target input cannot be empty!', color='negative')
+            return
         mode_dialog.close()
-        await start_scan(target_input.value, 'autonomous')
+        await start_scan(target_input.value, scan_type_select.value, 'autonomous')
 
     async def handle_manual_click():
+        if not target_input.value or not target_input.value.strip():
+        # 2. If it's empty, show a notification and stop.
+            ui.notify('Target input cannot be empty!', color='negative')
+            return
+
         mode_dialog.close()
-        await start_scan(target_input.value, 'manual')
+        await start_scan(target_input.value, scan_type_select.value, 'manual')
 
     with mode_dialog, ui.card():
         ui.label('Select Scan Mode').classes('text-h6')

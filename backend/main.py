@@ -25,15 +25,18 @@ class VaptState(TypedDict):
     detailed_analysis: dict
     findings_summary: str
     history: Annotated[List[str], lambda x, y: x + y]
+    tried_commands: Annotated[List[str], lambda x, y: x + y]
     report: str
+    scan_type: str
 
 # --- Node Functions ---
 async def planner_node(state: VaptState):
     print("\n--- DEBUG: Inside PLANNER_NODE (Start of a new scan) ---") # <-- ADD THIS
     logging.info("--- STRATEGY: PLANNING INITIAL ATTACK ---")
     target = state["user_query"]
-    command = await create_initial_plan(target)
-    return {"current_command": command, "target": target}
+    scan_type = state["scan_type"]
+    command = await create_initial_plan(target, scan_type, [])
+    return {"current_command": command, "target": target, "tried _commands":[command]}
 
 # The NEW, smarter version
 async def execute_node(state: VaptState, config: dict):
@@ -121,13 +124,18 @@ async def error_handler_node(state: VaptState):
         "history": [f"Error on command '{state['current_command']}'. Retrying with '{decision}'."]
     }
 async def decide_node(state: VaptState):
-    print("\n--- DEBUG: Inside DECIDE_NODE ---") # <-- ADD THIS
-    # This print will show us the exact summary the AI is seeing
-    print(f"--- DEBUG: Findings summary passed to decider: '{state.get('findings_summary')}'") # <-- ADD THIS
+    print("\n--- DEBUG: Inside DECIDE_NODE ---")
+    print(f"--- DEBUG: Findings summary passed to decider: '{state.get('findings_summary')}'")
     logging.info("--- DECIDE: CHOOSING NEXT TOOL ---")
-    next_command = await decide_next_action(state["findings_summary"], state["target"])
-    return {"current_command": next_command}
-
+    
+    # 1. Get the scan_type from the current state.
+    scan_type = state["scan_type"]
+    tried_command = state["tried_commands"]
+    
+    # 2. Pass it as the third argument to your agent.
+    next_command = await decide_next_action(state["findings_summary"], state["target"], scan_type, tried_command)
+    
+    return {"current_command": next_command, "tried_command":[next_command]}
 def report_node(state: VaptState):
     logging.info("--- REPORT: COMPILING FINAL FINDINGS ---")
     full_history = "\n".join(state["history"])
@@ -163,35 +171,31 @@ async def human_approval_gate(state: VaptState, config: dict):
 # --- Graph Compilation ---
 
 # In backend/main.py
+# This is the corrected compile_graph function for backend/main.py
 
 def compile_graph():
-    # This router is for nodes that PROPOSE commands
-   # The NEW, correct version
+    # This router is for nodes that PROPOSE commands (no changes here)
     def route_after_command_proposal(state: VaptState, config: dict):
-        # This line was missing. It defines the 'command' variable.
         command = state.get("current_command", "")
-        
         if command.upper() == "CONTINUE":
             return "decide"
-    
         if command.upper() == "END":
             return "report"
-        
         scan_mode = config['configurable'].get('scan_mode', 'auto')
         if scan_mode == 'manual':
             return "human_approval_gate"
         return "execute"
 
-    # --- THIS IS THE FIX ---
-    # A new router specifically for after the user clicks a button.
-    # It checks the user's choice from the config.
+    # --- THIS IS THE FIX (Part 1): Update the approval router ---
+    # It no longer goes directly to 'decide'. It goes to our new 'replan' node.
     def route_after_approval(state: VaptState, config: dict):
         user_choice = config['configurable'].get('user_choice').value
         if user_choice == 'approve':
             return "execute"
         else: # This path is for 'disapprove'
-            return "decide" # Go back to the Decider to get a new command
+            return "replan" # Go to the replan node to record the denied command
 
+    # This router is unchanged
     def check_for_errors(state: VaptState):
         if state.get("command_error"):
             return "error_handler"
@@ -199,9 +203,8 @@ def compile_graph():
 
     builder = StateGraph(VaptState)
 
-    # Add all your nodes...
+    # Add all your existing nodes...
     builder.add_node("planner", planner_node)
-    # The NEW way, binding the config
     builder.add_node("execute", execute_node, config_key="configurable")
     builder.add_node("analyze", analyze_node)
     builder.add_node("decide", decide_node)
@@ -209,9 +212,18 @@ def compile_graph():
     builder.add_node("report", report_node)
     builder.add_node("human_approval_gate", human_approval_gate)
 
+    # --- THIS IS THE FIX (Part 2): Add the new node ---
+    # This node's only job is to add the denied command to the 'tried' list.
+    def replan_node(state: VaptState):
+        command_denied = state["current_command"]
+        logging.info(f"Adding denied command to memory: {command_denied}")
+        return {"tried_commands": [command_denied]}
+    builder.add_node("replan", replan_node)
+    # --- END FIX ---
+
     builder.set_entry_point("planner")
 
-    # Edges that propose a command use the main router
+    # Edges from command proposers are unchanged
     builder.add_conditional_edges("planner", route_after_command_proposal, {
         "human_approval_gate": "human_approval_gate", "execute": "execute", "report": "report"
     })
@@ -222,31 +234,30 @@ def compile_graph():
        "decide":"decide" , "human_approval_gate": "human_approval_gate", "execute": "execute", "report": "report"
     })
 
-    # The edge from the approval gate uses the NEW router
+    # --- THIS IS THE FIX (Part 3): Update the edges from the approval gate ---
     builder.add_conditional_edges("human_approval_gate", route_after_approval, {
-        "execute": "execute", # On 'approve', go to execute
-        "decide": "decide"    # On 'disapprove', go back to decide
+        "execute": "execute", 
+        "replan": "replan"    # On 'disapprove', go to the new replan node
     })
     
-    # The rest of the graph
+    # --- THIS IS THE FIX (Part 4): Add the edge from the new node ---
+    # After the replan_node runs, always go to the decider.
+    builder.add_edge("replan", "decide")
+    
+    # The rest of the graph is unchanged
     builder.add_conditional_edges("execute", check_for_errors, {
         "error_handler": "error_handler", "analyze": "analyze"
     })
-    
     builder.add_edge("analyze", "decide")
     builder.add_edge("report", END)
 
-    return builder.compile()    
+    return builder.compile()   
    # --- Stream Runner ---
 async def run_vapt_agent_stream(target_query: str, config: dict):
-    # This function is the entrypoint for every scan.
-    # The fix is to ensure the initial_state is always created fresh here.
-    
     graph = compile_graph()
     
-    # --- THIS IS THE FIX ---
-    # We explicitly define a pristine initial state for every single run.
-    # This prevents any "state leakage" from a previous, disapproved run.
+    scan_type = config['configurable'].get('scan_type', 'Full Scan')
+    
     initial_state = {
         "user_query": target_query,
         "target": "", # Will be set by planner
@@ -254,6 +265,8 @@ async def run_vapt_agent_stream(target_query: str, config: dict):
         "command_output": "",
         "command_error": "",
         "executed_command": "",
+        "scan_type":scan_type,
+            "tried_commands": [],
         "detailed_analysis": {},
         "findings_summary": "No findings yet.",
         "history": [],
