@@ -5,66 +5,56 @@ from pathlib import Path
 import logging
 import asyncio
 
-# --- Project Path Setup ---
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-# --- Imports ---
 from backend.main import run_vapt_agent_stream
-from frontend.state import SharedState # Import the state management class
+from frontend.state import SharedState
 from frontend.components.control_panel import create_control_panel
 from frontend.components.approval_panel import create_approval_panel
 from frontend.components.reporting_panel import create_reporting_panel
 from frontend.components.history_panel import create_history_panel
+from frontend.components.settings_panel import create_settings_panel
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 @ui.page('/')
 def main_page():
-    
-    # Create an instance of our state object for this user session.
     state = SharedState()
-
-    # Create the history drawer, passing it the state object
     history_drawer, build_history_list = create_history_panel(state)
 
     def handle_history_click():
-        """Builds the history list right before opening the drawer."""
         if not history_drawer.value:
             build_history_list()
         history_drawer.toggle()
 
-    # --- HEADER DEFINITION ---
-    with ui.header(elevated=True).classes('bg-primary text-white'):
-        with ui.row().classes('w-full items-center'):
-            ui.label('AI-Powered VAPT Agent').classes('text-h5')
-            ui.space() 
-            ui.button(icon='history', on_click=handle_history_click).props('flat color=white') \
-                .tooltip('Toggle Command History')
+    settings_dialog = create_settings_panel()
+    
+    dark_mode = ui.dark_mode()
 
-    # --- MAIN PAGE CONTENT ---
+    with ui.header(elevated=True).classes('bg-gray-900 text-white'):
+        with ui.row().classes('w-full items-center'):
+            ui.label('PentAgent').classes('text-h5')
+            ui.space() 
+            ui.button(icon='history', on_click=handle_history_click).props('flat color=white').tooltip('Toggle Command History')
+            ui.button(icon='settings', on_click=settings_dialog.open).props('flat color=white').tooltip('AI Model Settings')
+            ui.button(icon="dark_mode", on_click=dark_mode.toggle).props('flat color=white')
+
     mode_dialog = ui.dialog()
-    
-    # --- THIS IS THE FIX (Part 1): Unpack the new dropdown from the component ---
     target_input, scan_type_select, start_button, stop_button = create_control_panel(state, mode_dialog)
-    
     create_approval_panel(state)
     analysis_view, log, status_label = create_reporting_panel()
 
-    # --- LOGIC AND CALLBACKS ---
     def update_button_states():
         start_button.set_enabled(not state.is_scan_running.value)
         stop_button.set_enabled(state.is_scan_running.value)
 
-    # --- THIS IS THE FIX (Part 2): Update start_scan to accept scan_type ---
     async def start_scan(target: str, scan_type: str, mode: str):
-        # Log the selected scan type to confirm it's working
         logging.info(f"--- Starting New Scan ---")
         logging.info(f"Target: {target}")
         logging.info(f"Scan Type: {scan_type}")
         logging.info(f"Mode: {mode}")
 
-        # Reset parts of the state for a clean run
         state.reset()
         log.clear()
         analysis_view.set_content('')
@@ -75,27 +65,33 @@ def main_page():
         
         state.stop_event.clear()
         state.approval_event.clear()
-
-        # Using the state object for temporary history storage
         state.scan_id_counter += 1
         scan_id_counter = state.scan_id_counter
         state.scan_id.value = scan_id_counter
-        
         state.scan_histories[scan_id_counter] = []
-        
-        # We will need to pass the scan_type to the backend in the future
+
+        selected_model = app.storage.user.get('selected_ai_model', 'Gemini')
+        api_key = app.storage.user.get('ai_api_key')
+
+        if not api_key:
+            ui.notify('API Key is not set! Please set it in the settings panel.', color='negative')
+            state.is_scan_running.value = False
+            update_button_states()      
+            return
+
         config = {
             "configurable": { 
                 "scan_mode": mode,
-                "scan_type": scan_type, # Pass the scan type here
+                "scan_type": scan_type,
                 "approval_event": state.approval_event, 
                 "stop_event": state.stop_event, 
-                "user_choice": state.user_choice 
-            }
+                "user_choice": state.user_choice, 
+                "selected_ai_model": selected_model,
+                "ai_api_key": api_key,
+            }               
         }
 
         try:
-            # We also need to pass the scan type to the backend stream function
             async for update in run_vapt_agent_stream(target, config):
                 node_name = list(update.keys())[0]
                 if node_name == "__end__":
@@ -115,7 +111,6 @@ def main_page():
                 if node_output and node_name == 'analyze':
                     interpretive_analysis = node_output.get('detailed_analysis', 'No analysis available.')
                     analysis_view.set_content(interpretive_analysis)
-                    
                     current_scan_history = state.scan_histories.get(state.scan_id.value)
                     if current_scan_history:
                         current_scan_history[-1]['analysis'] = interpretive_analysis
@@ -150,11 +145,8 @@ def main_page():
             update_button_states()
             status_label.text = "Scan Finished or Stopped."
 
-
     async def handle_autonomous_click():
-
         if not target_input.value or not target_input.value.strip():
-        # 2. If it's empty, show a notification and stop.
             ui.notify('Target input cannot be empty!', color='negative')
             return
         mode_dialog.close()
@@ -162,10 +154,8 @@ def main_page():
 
     async def handle_manual_click():
         if not target_input.value or not target_input.value.strip():
-        # 2. If it's empty, show a notification and stop.
             ui.notify('Target input cannot be empty!', color='negative')
             return
-
         mode_dialog.close()
         await start_scan(target_input.value, scan_type_select.value, 'manual')
 

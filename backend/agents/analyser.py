@@ -1,12 +1,14 @@
-# The analyser is now much cleaner and only focuses on prompt engineering.
-
-# --- It only needs to import our universal interface ---
 from .llm_interface import call_generative_model
+from ..types import VaptState
 
-async def analyze_and_summarize(command_output: str, existing_summary: str) -> dict:
+async def analyze_and_summarize(state: VaptState) -> dict:
     """
     Analyzes command output by calling the universal generative model interface twice.
     """
+
+    command_output = state['command_output']
+    existing_summary = state['findings_summary']
+
     print("\n[🧠] Extracting key facts and updating summary...")
 
     interpretive_analysis_prompt = f"""
@@ -16,7 +18,10 @@ async def analyze_and_summarize(command_output: str, existing_summary: str) -> d
         **OUTPUT INSTRUCTIONS:**
         - Your response MUST be a human-readable, bulleted list.
         - Each bullet MUST include:
-            • Severity level with emoji (🔴 Critical, 🟠 Medium, 🟢 Low, 🔵 Info)
+            • Severity level with emoji (🔴 Critical,
+                 🟠 Medium,
+                 🟢 Low,
+                 🔵 Info)
             • Key fact(s) (e.g., IP, open port, software version, etc.)
             • A brief reason why it’s relevant or how it could be exploited.
         - If the output indicates a logical failure (e.g., "Transfer failed", "Host seems down", "Connection refused"), you MUST report it with (⚠️ Failed).
@@ -30,15 +35,13 @@ async def analyze_and_summarize(command_output: str, existing_summary: str) -> d
         ---
 
         **Extracted Findings:**
-        """
+    """
 
-    # --- The AI call is now simple and clean ---
-    interpretive_analysis = await call_generative_model(interpretive_analysis_prompt)
+    interpretive_analysis = await call_generative_model(interpretive_analysis_prompt, state)
     if not interpretive_analysis:
         interpretive_analysis = "Error: Failed to analyze tool output."
     
     print(f"\n[📊] Extracted Facts:\n{interpretive_analysis}")
-
 
     summary_prompt = f"""
     You are a VAPT agent's memory manager. Update the 'Previous Cumulative Summary' with the key information from the 'Newly Extracted Facts'.
@@ -59,10 +62,9 @@ async def analyze_and_summarize(command_output: str, existing_summary: str) -> d
     **New Cumulative Summary:**
     """
     
-    # --- The second AI call is also simple and clean ---
-    updated_summary = await call_generative_model(summary_prompt)
+    updated_summary = await call_generative_model(summary_prompt, state)
     if not updated_summary:
-        updated_summary = existing_summary # On error, don't lose the old summary
+        updated_summary = existing_summary
 
     print(f"\n[📝] Updated Cumulative Summary:\n{updated_summary}")
 

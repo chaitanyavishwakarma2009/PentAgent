@@ -1,10 +1,11 @@
-# --- It only needs to import our new, universal interface ---
 from .llm_interface import call_generative_model
+from ..types import VaptState
 
-async def create_initial_plan(user_query: str, scan_type: str, tried_commands: list) -> str:
-    """
-    Creates an initial plan by calling the universal generative model interface.
-    """
+async def create_initial_plan(state: VaptState) -> str:
+    user_query = state['user_query']
+    scan_type = state['scan_type']
+    tried_commands = state.get('tried_commands', [])
+    
     print(f"\n[🧠] Creating initial plan for a '{scan_type}' on '{user_query}'...")
     
     prompt = f"""
@@ -19,13 +20,13 @@ async def create_initial_plan(user_query: str, scan_type: str, tried_commands: l
     - If the mission is "Web Application Scan", a good start is a web scanner: `nikto -h {user_query}`
     - For a "Full Scan", a balanced initial scan is best: `nmap -T4 -A -v {user_query}`
 
+    NEVER give command's in which user (like control c) have to interact and command does not end by it self.
+
     Return ONLY the single, complete command to run. Do not add any explanation or markdown.
     """
     
-    # --- The AI call is now simple and clean ---
-    initial_command = await call_generative_model(prompt)
-    
-    # The agent is still responsible for its own logic, like fallbacks.
+    initial_command = await call_generative_model(prompt, state)
+
     if not initial_command:
         print(f"[⚠] AI interface returned an empty command for '{scan_type}'. Using fallback.")
         return f"nmap -T4 -A -v {user_query}"

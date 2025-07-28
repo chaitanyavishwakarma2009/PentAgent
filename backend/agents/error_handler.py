@@ -1,12 +1,14 @@
-# The error handler is now much cleaner.
-
-# --- It only needs to import our universal interface ---
 from .llm_interface import call_generative_model
+from ..types import VaptState
 
-async def fix_command(failed_command: str, error_message: str) -> str:
+async def fix_command(state: VaptState) -> str:
     """
     Analyzes a failed command by calling the universal generative model interface.
     """
+
+    failed_command = state['current_command']
+    error_message = state['command_error']
+
     print("\n[🧠] Analyzing command error...")
 
     prompt = f"""
@@ -28,11 +30,9 @@ async def fix_command(failed_command: str, error_message: str) -> str:
 
     **Your Response (Corrected Command, "CONTINUE", or "ABORT"):**
     """
-    
-    # --- The AI call is now simple and clean ---
-    response = await call_generative_model(prompt)
-    
-    # The agent is still responsible for its own logic.
+
+    response = await call_generative_model(prompt, state)
+
     if not response:
         print(f"\n[✖] AI interface returned an empty response during error handling. Aborting.")
         return "ABORT"
