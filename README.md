@@ -40,7 +40,7 @@ uv pip install -r requirements.txt
 ### 4. Setup environment variables
 ```bash
 cp .env.example .env
-# Fill in your OpenAI, Gemini, Anthropic, or Ollama keys
+# You can fill in the API key through the GUI—no need to access the .env file.
 ```
 ### 5.🔧 Install Global Launcher
 ```bash
@@ -48,11 +48,28 @@ chmod +x install.sh
 ./install.sh
 
 ```
-## 6. You're all set!
+## 6. You're all set to run
 to run:
 ```bash
 pentagent
 ```
+## 🧪 Interface Preview
+
+After running `pentagent`, the application will open in your browser. You should see the main control panel like this:
+
+![PentAgent UI Screenshot](https://github.com/chaitanyavishwakarma2009/PentAgent/raw/main/Screenshot%202025-07-31%20171219.png)
+
+---
+
+## 🔑 Enter Your API Key
+
+To begin using AI features:
+
+- Click the ⚙️ **Settings** icon in the top-right corner.
+- Choose your preferred model from the dropdown.
+- Paste your API key for **OpenAI**, **Gemini**, **Anthropic**, or **Ollama**.
+
+![PentAgent API key area](https://github.com/chaitanyavishwakarma2009/PentAgent/raw/main/Screenshot%202025-07-31%20171408.png)
 
 # Description
 PentAgent is an AI-powered Vulnerability Assessment and Penetration Testing (VAPT) tool designed for cybersecurity professionals and ethical hackers. It uses a modular GUI and intelligent agents to automate scanning, interpretation, and reporting — saving you time and effort.
